@@ -362,3 +362,38 @@ def delete_user_book(db: Session, user_id: int, book_id: int):
     
     db.commit()
     return True
+
+# В crud.py добавить после функции get_book_statuses:
+
+def create_book_status(db: Session, status: schemas.BookStatusBase):
+    db_status = models.BookStatus(**status.dict())
+    db.add(db_status)
+    db.commit()
+    db.refresh(db_status)
+    return db_status
+
+def update_book_status(db: Session, status_id: int, status_update: schemas.BookStatusBase):
+    db_status = db.query(models.BookStatus).filter(
+        models.BookStatus.status_id == status_id
+    ).first()
+    
+    if not db_status:
+        return None
+    
+    for key, value in status_update.dict().items():
+        setattr(db_status, key, value)
+    
+    db.commit()
+    db.refresh(db_status)
+    return db_status
+
+def delete_book_status(db: Session, status_id: int):
+    db_status = db.query(models.BookStatus).filter(
+        models.BookStatus.status_id == status_id
+    ).first()
+    
+    if db_status:
+        db.delete(db_status)
+        db.commit()
+    
+    return db_status

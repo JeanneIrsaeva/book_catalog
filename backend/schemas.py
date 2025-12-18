@@ -94,6 +94,10 @@ class BookResponse(BookBase):
 class BookStatusBase(BaseModel):
     name: str
 
+# Или если хотите, чтобы при создании требовалось только имя:
+class BookStatusCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255, description="Название статуса")
+
 class BookStatusResponse(BookStatusBase):
     status_id: int
     
