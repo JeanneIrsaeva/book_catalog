@@ -261,6 +261,7 @@ def get_books_added_in_period(db: Session, start_date: date, end_date: date):
     return db.query(models.Book).filter(
         models.Book.added_date.between(start_date, end_date)
     ).all()
+    
 
 def create_report_record(db: Session, user_id: int, report_type: str,
                          period_from: Optional[date], period_to: Optional[date],
@@ -311,27 +312,37 @@ def get_current_book_status(db: Session, user_id: int, book_id: int):
     return None
 
 def get_books_added_in_period_by_user(db: Session, user_id: int, start_date: date, end_date: date):
-    """Получение книг, добавленных пользователем за период"""
+    """Получение книг, добавленных пользователем за период (по дате создания аналитики)"""
     try:
-        # Получаем книги пользователя из аналитики
-        # Находим первую запись аналитики для каждой книги (когда книга была добавлена)
+        print(f"Поиск книг пользователя {user_id} за период с {start_date} по {end_date}")
+        
+        # Увеличиваем end_date на 1 день, чтобы включить весь последний день
+        from datetime import timedelta
+        end_date_inclusive = end_date + timedelta(days=1)
+        
+        # Ищем книги по первой записи в аналитике
         from sqlalchemy import func
         
-        # Подзапрос для получения минимальной даты создания аналитики для каждой книги пользователя
+        # Подзапрос: находим минимальную дату создания аналитики для каждой книги пользователя
         subquery = db.query(
             models.Analytics.book_id,
-            func.min(models.Analytics.created_date).label('min_created_date')
+            func.min(models.Analytics.created_date).label('first_analytics_date')
         ).filter(
             models.Analytics.user_id == user_id
         ).group_by(models.Analytics.book_id).subquery()
         
-        # Получаем книги, где минимальная дата создания аналитики попадает в период
+        # Основной запрос: книги, где первая аналитика попадает в период
         books = db.query(models.Book).join(
             subquery,
             models.Book.book_id == subquery.c.book_id
         ).filter(
-            subquery.c.min_created_date.between(start_date, end_date)
+            subquery.c.first_analytics_date >= start_date,
+            subquery.c.first_analytics_date < end_date_inclusive  # Строго меньше следующего дня
         ).all()
+        
+        print(f"Найдено книг за период: {len(books)}")
+        for book in books:
+            print(f"  - Книга ID {book.book_id}: '{book.title}'")
         
         return books
         
