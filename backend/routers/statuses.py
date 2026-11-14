@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 import schemas
 import crud
+import models
 from auth import get_current_admin_user, get_current_user  # Изменено: добавлен get_current_admin_user
 
 router = APIRouter(prefix="/statuses", tags=["book_statuses"])
