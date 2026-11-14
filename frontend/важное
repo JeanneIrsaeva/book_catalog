@@ -1,2 +1,4 @@
 npm install axios react-router-dom @mui/material @emotion/react @emotion/styled @mui/icons-material formik yup react-pdf react-toastify
 npm install @mui/x-date-pickers date-fns
+
+$env:DANGEROUSLY_DISABLE_HOST_CHECK="true"; npm start

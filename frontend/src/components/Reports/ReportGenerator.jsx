@@ -59,7 +59,7 @@ const ReportGenerator = () => {
       a.remove();
       window.URL.revokeObjectURL(url);
 
-      toast.success('Отчет сгенерирован и скачан');
+      toast.success('Отчет сгенерирован');
     } catch (err) {
       setError('Ошибка генерации отчета');
       toast.error('Ошибка генерации отчета');

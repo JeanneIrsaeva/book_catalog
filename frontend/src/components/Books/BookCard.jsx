@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   CardContent,
@@ -19,6 +19,8 @@ import {
   IconButton,
   Tooltip,
   Alert,
+  Stack,
+  CircularProgress,
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -35,15 +37,6 @@ import { toast } from 'react-toastify';
 import { bookService } from '../../services/books';
 import { reportService } from '../../services/reports';
 
-// Функция debounce для предотвращения многократных вызовов
-const debounce = (func, wait) => {
-  let timeout;
-  return (...args) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
-  };
-};
-
 const BookCard = ({ book, onUpdate, onEdit, onDelete }) => {
   const [statuses, setStatuses] = useState([]);
   const [currentStatus, setCurrentStatus] = useState(null);
@@ -56,158 +49,71 @@ const BookCard = ({ book, onUpdate, onEdit, onDelete }) => {
     end_date: null,
     pages_read: '',
   });
-  const [loading, setLoading] = useState(false);
+  const [statusLoading, setStatusLoading] = useState(false);
   const [error, setError] = useState('');
-  
-  // Refs для отслеживания состояния загрузки
-  const isMounted = useRef(true);
-  const loadAbortController = useRef(null);
 
-  // Мемоизированные функции с дебаунсом
-  const loadStatuses = useCallback(
-    debounce(async () => {
-      if (!isMounted.current) return;
+  const loadStatuses = useCallback(async () => {
+    try {
+      const data = await bookService.getStatuses();
+      setStatuses(data);
       
-      try {
-        console.log('Загрузка статусов...');
-        const data = await bookService.getStatuses();
-        if (isMounted.current) {
-          setStatuses(data);
-          // Устанавливаем текущий статус по умолчанию
-          if (currentStatus && data.length > 0) {
-            const current = data.find(s => s.status_id === currentStatus.status_id);
-            if (current) {
-              setStatusData(prev => ({ ...prev, status_id: current.status_id }));
-            }
-          }
-        }
-      } catch (err) {
-        if (isMounted.current && err.name !== 'AbortError') {
-          console.error('Ошибка загрузки статусов:', err);
-        }
+      // Загружаем текущий статус книги
+      const status = await bookService.getBookStatus(book.book_id);
+      if (status) {
+        setCurrentStatus(status);
+        setStatusData(prev => ({ ...prev, status_id: status.status_id }));
       }
-    }, 500),
-    [currentStatus]
-  );
-
-  const loadCurrentStatus = useCallback(
-    debounce(async () => {
-      if (!isMounted.current || !book?.book_id) return;
       
-      try {
-        console.log(`Загрузка текущего статуса книги ${book.book_id}...`);
-        const status = await bookService.getBookStatus(book.book_id);
-        if (isMounted.current) {
-          setCurrentStatus(status);
-          if (status) {
-            setStatusData(prev => ({ ...prev, status_id: status.status_id }));
-          }
-        }
-      } catch (err) {
-        if (isMounted.current && err.name !== 'AbortError') {
-          console.error('Ошибка загрузки текущего статуса:', err);
-        }
-      }
-    }, 500),
-    [book?.book_id]
-  );
-
-  const loadStatusHistory = useCallback(
-    debounce(async () => {
-      if (!isMounted.current || !book?.book_id) return;
-      
-      try {
-        console.log(`Загрузка истории статусов книги ${book.book_id}...`);
-        const history = await bookService.getBookStatusHistory(book.book_id);
-        if (isMounted.current) {
-          setStatusHistory(history);
-        }
-      } catch (err) {
-        if (isMounted.current && err.name !== 'AbortError') {
-          console.error('Ошибка загрузки истории статусов:', err);
-        }
-      }
-    }, 500),
-    [book?.book_id]
-  );
-
-  // Загружаем данные только при монтировании и при изменении книги
-  useEffect(() => {
-    isMounted.current = true;
-    
-    if (book) {
-      console.log('Инициализация загрузки данных для книги:', book.book_id);
-      
-      // Создаем новый AbortController для отмены предыдущих запросов
-      if (loadAbortController.current) {
-        loadAbortController.current.abort();
-      }
-      loadAbortController.current = new AbortController();
-      
-      // Загружаем данные с задержкой между запросами
-      const timer = setTimeout(() => {
-        loadStatuses();
-        setTimeout(() => {
-          loadCurrentStatus();
-          setTimeout(() => {
-            loadStatusHistory();
-          }, 100);
-        }, 100);
-      }, 100);
-      
-      return () => {
-        clearTimeout(timer);
-        if (loadAbortController.current) {
-          loadAbortController.current.abort();
-        }
-      };
+      // Загружаем историю статусов
+      const history = await bookService.getBookStatusHistory(book.book_id);
+      setStatusHistory(history);
+    } catch (err) {
+      console.error('Ошибка загрузки статусов:', err);
     }
-    
-    return () => {
-      isMounted.current = false;
-    };
-  }, [book]); // Только при изменении книги
+  }, [book.book_id]);
+
+  useEffect(() => {
+    loadStatuses();
+  }, [loadStatuses]);
 
   const handleUpdateStatus = async () => {
     try {
       setError('');
-      
+      setStatusLoading(true);
+
       if (!statusData.status_id) {
         setError('Выберите статус');
         return;
       }
 
-      // Блокируем повторные запросы
-      if (loading) return;
-      
-      setLoading(true);
-      
-      // Подготовка данных - ТОЛЬКО status_id обязательно, остальное опционально
       const statusUpdateData = {
         status_id: parseInt(statusData.status_id)
       };
-      
-      // Добавляем опциональные поля только если они заполнены
+
       if (statusData.pages_read && statusData.pages_read !== '') {
         statusUpdateData.pages_read = parseInt(statusData.pages_read);
       }
-      
+
       if (statusData.start_date) {
         statusUpdateData.start_date = new Date(statusData.start_date).toISOString().split('T')[0];
       }
-      
+
       if (statusData.end_date) {
         statusUpdateData.end_date = new Date(statusData.end_date).toISOString().split('T')[0];
       }
-      
-      console.log('Отправка статуса:', statusUpdateData);
-      
-      const response = await bookService.updateBookStatus(book.book_id, statusUpdateData);
-      console.log('Успешный ответ:', response);
-      
+
+      await bookService.updateBookStatus(book.book_id, statusUpdateData);
       toast.success('Статус обновлен');
       setOpenStatusDialog(false);
       
+      // Мгновенное обновление UI
+      const updatedStatus = statuses.find(s => s.status_id === parseInt(statusData.status_id));
+      setCurrentStatus(updatedStatus);
+      
+      // Загружаем обновленную историю
+      const history = await bookService.getBookStatusHistory(book.book_id);
+      setStatusHistory(history);
+
       // Сбрасываем форму
       setStatusData({
         status_id: '',
@@ -215,47 +121,23 @@ const BookCard = ({ book, onUpdate, onEdit, onDelete }) => {
         end_date: null,
         pages_read: ''
       });
-      
-      // Обновляем данные с небольшой задержкой
-      setTimeout(async () => {
-        if (isMounted.current) {
-          await loadCurrentStatus();
-          await loadStatusHistory();
-          if (onUpdate) onUpdate();
-        }
-      }, 500);
-      
+
     } catch (err) {
-      console.error('Ошибка обновления статуса:', err);
-      console.error('Детали ответа сервера:', err.response?.data);
-      
       let errorMessage = 'Ошибка обновления статуса';
-      
-      // Обрабатываем ошибку валидации
       if (err.response?.status === 422) {
-        errorMessage = 'Ошибка валидации данных: ';
+        errorMessage = 'Ошибка валидации данных';
         if (err.response?.data?.detail) {
-          // Если это массив ошибок
           if (Array.isArray(err.response.data.detail)) {
-            errorMessage += err.response.data.detail.map(e => e.msg).join(', ');
+            errorMessage = err.response.data.detail.map(e => e.msg).join(', ');
           } else {
-            errorMessage += err.response.data.detail;
+            errorMessage = err.response.data.detail;
           }
         }
-      } else if (err.response?.data?.detail) {
-        errorMessage = err.response.data.detail;
-      } else if (err.message) {
-        errorMessage = err.message;
       }
-      
-      if (isMounted.current) {
-        setError(errorMessage);
-        toast.error(errorMessage);
-      }
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
-      if (isMounted.current) {
-        setLoading(false);
-      }
+      setStatusLoading(false);
     }
   };
 
@@ -265,7 +147,7 @@ const BookCard = ({ book, onUpdate, onEdit, onDelete }) => {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `book_card_${book.book_id}.pdf`;
+      a.download = `book_${book.book_id}_${new Date().toISOString().split('T')[0]}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -295,127 +177,173 @@ const BookCard = ({ book, onUpdate, onEdit, onDelete }) => {
     }
   };
 
-  // Обработчик открытия диалога статуса
-  const handleOpenStatusDialog = () => {
-    // Загружаем свежие данные перед открытием диалога
-    if (book) {
-      loadStatuses();
-      loadCurrentStatus();
-    }
-    setOpenStatusDialog(true);
-  };
-
-  // Обработчик открытия диалога истории
-  const handleOpenHistoryDialog = () => {
-    // Загружаем свежую историю перед открытием
-    if (book) {
-      loadStatusHistory();
-    }
-    setOpenHistoryDialog(true);
-  };
-
   return (
     <>
-      <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-        <CardContent sx={{ flexGrow: 1 }}>
-          <Typography variant="h6" gutterBottom>
+      <Card 
+        sx={{ 
+          height: '100%', 
+          display: 'flex', 
+          flexDirection: 'column',
+          transition: 'all 0.3s ease',
+          '&:hover': {
+            transform: 'translateY(-4px)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          },
+          borderRadius: 2,
+          overflow: 'hidden',
+          position: 'relative',
+        }}
+      >
+        {/* Кнопка PDF в правом верхнем углу */}
+        <Box sx={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}>
+          <Tooltip title="Скачать PDF">
+            <IconButton
+              size="small"
+              onClick={handleDownloadBookCard}
+              sx={{ 
+                bgcolor: 'white',
+                '&:hover': { bgcolor: 'grey.100' }
+              }}
+            >
+              <DownloadIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+
+        <CardContent sx={{ flexGrow: 1, pb: 1 }}>
+          {/* Заголовок */}
+          <Typography 
+            variant="h6" 
+            gutterBottom
+            sx={{ 
+              fontWeight: 600,
+              lineHeight: 1.3,
+              mb: 2,
+              pr: 4 // Отступ для кнопки PDF
+            }}
+          >
             {book.title}
           </Typography>
-          
-          <Typography variant="body2" color="textSecondary" gutterBottom>
-            Авторы: {book.authors.map(a => `${a.last_name} ${a.first_name}`).join(', ')}
-          </Typography>
-          
-          <Typography variant="body2" color="textSecondary" gutterBottom>
-            Год издания: {book.published}
-          </Typography>
-          
-          <Typography variant="body2" color="textSecondary" gutterBottom>
-            Издательство: {book.publisher?.name}
-          </Typography>
-          
-          <Box sx={{ mt: 2, mb: 2 }}>
-            {book.genres.map((genre) => (
-              <Chip
-                key={genre.genre_id}
-                label={genre.name}
-                size="small"
-                sx={{ mr: 1, mb: 1 }}
-              />
-            ))}
-          </Box>
-          
-          {currentStatus && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-              <Chip
-                label={currentStatus.name}
-                color={getStatusColor(currentStatus)}
-                icon={<BookmarkIcon />}
-              />
-              <Tooltip title="История статусов">
-                <IconButton
-                  size="small"
-                  onClick={handleOpenHistoryDialog}
-                >
-                  <HistoryIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
+
+          {/* Информация о книге */}
+          <Stack spacing={1.5}>
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Авторы
+              </Typography>
+              <Typography variant="body2">
+                {book.authors.map(a => `${a.last_name} ${a.first_name}`).join(', ')}
+              </Typography>
             </Box>
-          )}
-          
-          {book.description && (
-            <Typography variant="body2" sx={{ mt: 2 }}>
-              {book.description.length > 150
-                ? `${book.description.substring(0, 150)}...`
-                : book.description}
-            </Typography>
-          )}
+
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Издательство
+              </Typography>
+              <Typography variant="body2">
+                {book.publisher?.name}, {book.published}
+              </Typography>
+            </Box>
+
+            {/* Жанры */}
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                Жанры
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                {book.genres.map((genre) => (
+                  <Chip
+                    key={genre.genre_id}
+                    label={genre.name}
+                    size="small"
+                    variant="outlined"
+                  />
+                ))}
+              </Box>
+            </Box>
+          </Stack>
+
+          {/* Статус */}
+          <Box sx={{ mt: 3, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+            {currentStatus ? (
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Chip
+                  label={currentStatus.name}
+                  color={getStatusColor(currentStatus)}
+                  size="small"
+                  sx={{ fontWeight: 500 }}
+                />
+                <Tooltip title="История статусов">
+                  <IconButton
+                    size="small"
+                    onClick={() => setOpenHistoryDialog(true)}
+                  >
+                    <HistoryIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Button
+                  size="small"
+                  onClick={() => setOpenStatusDialog(true)}
+                  sx={{ ml: 'auto' }}
+                >
+                  Изменить
+                </Button>
+              </Stack>
+            ) : (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<BookmarkIcon />}
+                onClick={() => setOpenStatusDialog(true)}
+                fullWidth
+              >
+                Установить статус
+              </Button>
+            )}
+          </Box>
         </CardContent>
-        
-        <CardActions>
-          <Button
-            size="small"
-            startIcon={<EditIcon />}
-            onClick={() => onEdit && onEdit(book)}
-          >
-            Редактировать
-          </Button>
-          <Button
-            size="small"
-            startIcon={<EditIcon />}
-            onClick={handleOpenStatusDialog}
-          >
-            Статус
-          </Button>
-          <Button
-            size="small"
-            startIcon={<DownloadIcon />}
-            onClick={handleDownloadBookCard}
-          >
-            PDF
-          </Button>
-          <Button
-            size="small"
-            startIcon={<DeleteIcon />}
-            color="error"
-            onClick={() => onDelete && onDelete(book)}
-            sx={{ marginLeft: 'auto' }}
-          >
-            Удалить
-          </Button>
+
+        {/* Кнопки действий */}
+        <CardActions sx={{ p: 2, pt: 1, borderTop: 1, borderColor: 'divider' }}>
+          <Stack direction="row" spacing={1} width="100%">
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<EditIcon />}
+              onClick={() => onEdit && onEdit(book)}
+              sx={{ flex: 1 }}
+            >
+              Редактировать
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              color="error"
+              startIcon={<DeleteIcon />}
+              onClick={() => onDelete && onDelete(book)}
+              sx={{ flex: 1 }}
+            >
+              Удалить
+            </Button>
+          </Stack>
         </CardActions>
       </Card>
-      
+
       {/* Диалог изменения статуса */}
-      <Dialog open={openStatusDialog} onClose={() => setOpenStatusDialog(false)}>
+      <Dialog 
+        open={openStatusDialog} 
+        onClose={() => setOpenStatusDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle>Изменение статуса книги</DialogTitle>
         <DialogContent>
           <LocalizationProvider dateAdapter={AdapterDateFns} locale={ru}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2, minWidth: 300 }}>
+            <Stack spacing={2} sx={{ mt: 1 }}>
               {error && (
                 <Alert severity="error">{error}</Alert>
               )}
-              
+
               <FormControl fullWidth required>
                 <InputLabel>Статус</InputLabel>
                 <Select
@@ -430,9 +358,9 @@ const BookCard = ({ book, onUpdate, onEdit, onDelete }) => {
                   ))}
                 </Select>
               </FormControl>
-              
+
               <DatePicker
-                label="Дата начала (опционально)"
+                label="Дата начала"
                 value={statusData.start_date}
                 onChange={(newValue) => {
                   if (newValue && !isNaN(new Date(newValue).getTime())) {
@@ -443,9 +371,9 @@ const BookCard = ({ book, onUpdate, onEdit, onDelete }) => {
                 }}
                 renderInput={(params) => <TextField {...params} fullWidth />}
               />
-
+              
               <DatePicker
-                label="Дата окончания (опционально)"
+                label="Дата окончания"
                 value={statusData.end_date}
                 onChange={(newValue) => {
                   if (newValue && !isNaN(new Date(newValue).getTime())) {
@@ -456,75 +384,102 @@ const BookCard = ({ book, onUpdate, onEdit, onDelete }) => {
                 }}
                 renderInput={(params) => <TextField {...params} fullWidth />}
               />
-              
+
               <TextField
-                label="Прочитано страниц (опционально)"
+                label="Прочитано страниц"
                 type="number"
                 value={statusData.pages_read}
                 onChange={(e) => setStatusData({...statusData, pages_read: e.target.value})}
                 inputProps={{ min: 0 }}
               />
-            </Box>
+            </Stack>
           </LocalizationProvider>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenStatusDialog(false)}>Отмена</Button>
-          <Button onClick={handleUpdateStatus} variant="contained" disabled={loading}>
-            {loading ? 'Сохранение...' : 'Сохранить'}
+          <Button 
+            onClick={handleUpdateStatus} 
+            variant="contained" 
+            disabled={statusLoading}
+          >
+            {statusLoading ? <CircularProgress size={24} /> : 'Сохранить'}
           </Button>
         </DialogActions>
       </Dialog>
-      
+
       {/* Диалог истории статусов */}
-      <Dialog open={openHistoryDialog} onClose={() => setOpenHistoryDialog(false)} maxWidth="md" fullWidth>
+      <Dialog 
+        open={openHistoryDialog} 
+        onClose={() => setOpenHistoryDialog(false)} 
+        maxWidth="md" 
+        fullWidth
+      >
         <DialogTitle>История статусов книги</DialogTitle>
         <DialogContent>
-          <Box sx={{ mt: 2 }}>
+          <Stack spacing={2} sx={{ mt: 2 }}>
             {statusHistory.length === 0 ? (
-              <Typography color="textSecondary">История статусов отсутствует</Typography>
+              <Typography color="text.secondary" align="center" py={3}>
+                История статусов отсутствует
+              </Typography>
             ) : (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {statusHistory.map((historyItem, index) => (
-                  <Box
-                    key={index}
-                    sx={{
-                      p: 2,
-                      border: '1px solid',
-                      borderColor: 'divider',
-                      borderRadius: 1,
-                      backgroundColor: index === 0 ? 'action.hover' : 'background.paper'
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              statusHistory.map((historyItem, index) => (
+                <Box
+                  key={index}
+                  sx={{
+                    p: 2,
+                    borderRadius: 1,
+                    bgcolor: index === 0 ? 'primary.light' : 'background.default',
+                    border: 1,
+                    borderColor: 'divider',
+                    backgroundColor: index === 0 ? 'grey.50' : 'background.paper',
+                  }}
+                >
+                  <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2}>
+                    <Box>
                       <Typography variant="subtitle1" fontWeight="bold">
                         {statuses.find(s => s.status_id === historyItem.status_id)?.name || 'Неизвестный статус'}
                       </Typography>
-                      <Typography variant="body2" color="textSecondary">
+                      <Typography variant="body2" color="text.secondary">
                         {formatDate(historyItem.created_date)}
                       </Typography>
                     </Box>
-                    <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Stack direction="row" spacing={2}>
                       {historyItem.start_date && (
-                        <Typography variant="body2">
-                          Начало: {formatDate(historyItem.start_date)}
-                        </Typography>
+                        <Box>
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            Начало
+                          </Typography>
+                          <Typography variant="body2">
+                            {formatDate(historyItem.start_date)}
+                          </Typography>
+                        </Box>
                       )}
                       {historyItem.end_date && (
-                        <Typography variant="body2">
-                          Окончание: {formatDate(historyItem.end_date)}
-                        </Typography>
+                        <Box>
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            Окончание
+                          </Typography>
+                          <Typography variant="body2">
+                            {formatDate(historyItem.end_date)}
+                          </Typography>
+                        </Box>
                       )}
                       {historyItem.pages_read && (
-                        <Typography variant="body2">
-                          Страниц: {historyItem.pages_read}
-                        </Typography>
+                        <Box>
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            Страниц
+                          </Typography>
+                          <Typography variant="body2">
+                            {historyItem.pages_read}
+                          </Typography>
+                        </Box>
                       )}
-                    </Box>
-                  </Box>
-                ))}
-              </Box>
+                    </Stack>
+                  </Stack>
+                </Box>
+              ))
             )}
-          </Box>
+          </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenHistoryDialog(false)}>Закрыть</Button>
